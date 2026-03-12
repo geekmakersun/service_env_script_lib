@@ -3,7 +3,7 @@
 # ===========================================
 # 配置Git脚本
 # 功能：配置Git和升级到最新版本
-# 版本：1.5
+# 版本：1.8
 # 适配环境：Ubuntu/Debian
 # ===========================================
 
@@ -75,44 +75,66 @@ main() {
     # 检查root权限
     check_root
     
-    # 配置 Git
-    print_info "\n=== 配置 Git ==="
-    while true; do
-        read -p "是否配置 Git? (y/n): " CONFIG_GIT
-        case "$CONFIG_GIT" in
-            [yY])
-                while true; do
-                    read -p "请输入 Git 用户名: " GIT_USERNAME
-                    if [ -z "$GIT_USERNAME" ]; then
-                        print_error "Git 用户名不能为空"
-                        continue
-                    fi
+    # 检查 Git 是否已配置
+    EXISTING_GIT_NAME=$(git config --global user.name 2>/dev/null)
+    EXISTING_GIT_EMAIL=$(git config --global user.email 2>/dev/null)
+    
+    if [ -n "$EXISTING_GIT_NAME" ] && [ -n "$EXISTING_GIT_EMAIL" ]; then
+        print_warning "检测到 Git 已配置:"
+        print_info "  用户名: $EXISTING_GIT_NAME"
+        print_info "  邮箱: $EXISTING_GIT_EMAIL"
+        read -p "是否重新配置 Git? (y/n): " RECONFIG_GIT
+        if [[ ! "$RECONFIG_GIT" =~ ^[yY]$ ]]; then
+            print_info "跳过 Git 配置"
+            GIT_CONFIGURED=true
+        fi
+    fi
+    
+    if [ "$GIT_CONFIGURED" != true ]; then
+        print_info "\n=== 配置 Git ==="
+        while true; do
+            read -p "是否配置 Git? (y/n): " CONFIG_GIT
+            case "$CONFIG_GIT" in
+                [yY])
+                    while true; do
+                        read -p "请输入 Git 用户名: " GIT_USERNAME
+                        if [ -z "$GIT_USERNAME" ]; then
+                            print_error "Git 用户名不能为空"
+                            continue
+                        fi
+                        break
+                    done
+                    
+                    while true; do
+                        read -p "请输入 Git 邮箱: " GIT_EMAIL
+                        if [ -z "$GIT_EMAIL" ]; then
+                            print_error "Git 邮箱不能为空"
+                            continue
+                        fi
+                        if ! [[ "$GIT_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+                            print_error "邮箱格式不正确"
+                            continue
+                        fi
+                        break
+                    done
+                    
+                    git config --global user.name "$GIT_USERNAME"
+                    git config --global user.email "$GIT_EMAIL"
+                    print_success "Git 配置完成:"
+                    print_info "  用户名: $GIT_USERNAME"
+                    print_info "  邮箱: $GIT_EMAIL"
                     break
-                done
-                
-                while true; do
-                    read -p "请输入 Git 邮箱: " GIT_EMAIL
-                    if [ -z "$GIT_EMAIL" ]; then
-                        print_error "Git 邮箱不能为空"
-                        continue
-                    fi
-                    # 简单的邮箱格式验证
-                    if ! [[ "$GIT_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-                        print_error "邮箱格式不正确"
-                        continue
-                    fi
+                ;;
+                [nN])
+                    print_info "跳过 Git 配置"
                     break
-                done
-                
-                git config --global user.name "$GIT_USERNAME"
-                git config --global user.email "$GIT_EMAIL"
-                print_success "Git 配置完成:"
-                print_info "  用户名: $GIT_USERNAME"
-                print_info "  邮箱: $GIT_EMAIL"
-                break
-            ;;
-        esac
-    done
+                ;;
+                *)
+                    print_error "无效输入，请输入 y 或 n"
+                    ;;
+            esac
+        done
+    fi
     
     # 升级 Git 到最新版本
     print_info "\n=== 升级 Git ==="
@@ -151,18 +173,11 @@ main() {
         read -p "是否生成 SSH 密钥? (y/n): " GENERATE_SSH_KEY
         case "$GENERATE_SSH_KEY" in
             [yY])
-                while true; do
-                    read -p "请输入 SSH 密钥邮箱: " SSH_KEY_EMAIL
-                    if [ -z "$SSH_KEY_EMAIL" ]; then
-                        print_error "邮箱不能为空"
-                        continue
-                    fi
-                    if ! [[ "$SSH_KEY_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-                        print_error "邮箱格式不正确"
-                        continue
-                    fi
-                    break
-                done
+                HOSTNAME=$(hostname)
+                read -p "请输入 SSH 密钥主机名 (默认: $HOSTNAME): " SSH_KEY_COMMENT
+                if [ -z "$SSH_KEY_COMMENT" ]; then
+                    SSH_KEY_COMMENT="$HOSTNAME"
+                fi
                 
                 SSH_KEY_PATH="$HOME/.ssh/id_ed25519"
                 
@@ -176,7 +191,7 @@ main() {
                 fi
                 
                 print_info "正在生成 Ed25519 SSH 密钥..."
-                ssh-keygen -t ed25519 -C "$SSH_KEY_EMAIL" -f "$SSH_KEY_PATH" -N ""
+                ssh-keygen -t ed25519 -C "$SSH_KEY_COMMENT" -f "$SSH_KEY_PATH" -N ""
                 
                 if [ $? -eq 0 ]; then
                     chmod 600 "$SSH_KEY_PATH"
