@@ -333,7 +333,7 @@ install_pecl_extensions() {
     # 检查并安装 ImageMagick 扩展
     if ! php -m | grep -q "imagick"; then
         log_info "安装 imagick 扩展..."
-        /usr/local/php84/bin/pecl install imagick || true
+        printf "/usr\nno\nno\nno\nno\n" | /usr/local/php84/bin/pecl install imagick || true
     else
         log_info "imagick 扩展已安装，跳过"
     fi
