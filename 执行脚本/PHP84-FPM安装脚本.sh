@@ -678,67 +678,54 @@ EOF
 enable_nginx_php() {
     log_info "启用 Nginx PHP 支持..."
     
-    # 检查 Nginx 是否安装
     if ! command -v nginx &> /dev/null; then
         log_warn "未检测到 Nginx，跳过 PHP 配置"
         return 0
     fi
     
-    # 检查 Nginx 配置文件
-    local nginx_common_conf="/etc/nginx/snippets/common.conf"
-    if [ ! -f "$nginx_common_conf" ]; then
-        log_warn "未找到 Nginx 共用配置文件 $nginx_common_conf"
+    local nginx_conf="/etc/nginx/sites-enabled/default.conf"
+    if [ ! -f "$nginx_conf" ]; then
+        log_warn "未找到 Nginx 配置文件 $nginx_conf"
         return 0
     fi
     
-    # 创建 fastcgi-php.conf 配置文件（如果不存在）
-    local fastcgi_php_conf="/etc/nginx/snippets/fastcgi-php.conf"
-    if [ ! -f "$fastcgi_php_conf" ]; then
+    if grep -q "location ~ \\\.php\$" "$nginx_conf" 2>/dev/null; then
+        log_info "Nginx PHP 配置已存在，跳过"
+        return 0
+    fi
+    
+    if [ ! -f "/etc/nginx/snippets/fastcgi-php.conf" ]; then
         log_info "创建 fastcgi-php.conf 配置文件..."
-        cat > "$fastcgi_php_conf" << 'EOF'
-# regex to split $uri to $fastcgi_script_name and $fastcgi_path
+        cat > /etc/nginx/snippets/fastcgi-php.conf << 'EOF'
 fastcgi_split_path_info ^(.+?\.php)(/.*)$;
-
-# Check that the PHP script exists before passing it
 try_files $fastcgi_script_name =404;
-
-# Bypass the fact that try_files resets $fastcgi_path_info
-# see: http://trac.nginx.org/nginx/ticket/321
-set $path_info $fastcgi_path_info;
+set $path_info $fastcgi_index_info;
 fastcgi_param PATH_INFO $path_info;
-
 fastcgi_index index.php;
-
 include fastcgi_params;
-
 fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-fastcgi_param PHP_VALUE "open_basedir=$document_root/:/tmp/";
 EOF
     fi
     
-    # 备份原配置文件
-    cp "$nginx_common_conf" "${nginx_common_conf}.bak"
+    if grep -q "index index.html" "$nginx_conf"; then
+        sed -i 's/index index.html/index index.php index.html/' "$nginx_conf"
+    fi
     
-    # 启用 PHP 处理配置 - 使用更可靠的方法
-    # 替换整个 PHP 配置块而不是逐行取消注释
-    sed -i '/# ---------- PHP 处理配置/,/# }/c\
-# ---------- PHP 处理配置（需要安装 PHP-FPM 后启用） ----------\
-location ~ \.php$ {\
-    include snippets/fastcgi-php.conf;\
-    fastcgi_pass unix:/var/run/php-fpm/php84-fpm.sock;\
-    fastcgi_connect_timeout 300s;\
-    fastcgi_send_timeout 300s;\
-    fastcgi_read_timeout 300s;\
-}' "$nginx_common_conf"
+    cat >> "$nginx_conf" << 'EOF'
+
+location ~ \.php$ {
+    include fastcgi_params;
+    fastcgi_pass unix:/var/run/php-fpm/php84-fpm.sock;
+    fastcgi_index index.php;
+    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+}
+EOF
     
-    # 测试 Nginx 配置
     if nginx -t 2>&1 | grep -q "successful"; then
-        # 重启 Nginx
         systemctl reload nginx
         log_success "Nginx PHP 支持已启用"
     else
-        log_warn "Nginx 配置测试失败，已恢复备份"
-        cp "${nginx_common_conf}.bak" "$nginx_common_conf"
+        log_error "Nginx 配置测试失败"
         return 1
     fi
 }
@@ -1006,6 +993,7 @@ main() {
     install_pecl_extensions
     configure_php_fpm
     create_systemd_service
+    enable_nginx_php
     create_probe_file
     install_wp_cli
     verify_installation
