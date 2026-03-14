@@ -1549,6 +1549,20 @@ install_act_runner() {
         return 1
     fi
 
+    # 检查 Node.js 24 是否已安装
+    print_info "检查 Node.js 版本..."
+    if command -v node &> /dev/null; then
+        local node_version=$(node --version)
+        print_success "Node.js 已安装: $node_version"
+        # 确保使用 Node.js 24
+        if command -v nvm &> /dev/null; then
+            nvm use 24
+            print_info "已切换到 Node.js 24"
+        fi
+    else
+        print_warning "Node.js 未安装，继续安装 Act Runner"
+    fi
+
     # 下载 Act Runner
     print_info "正在下载 Act Runner ${ACT_RUNNER_VERSION} (${RUNNER_ARCH})..."
     wget -O "${ACT_RUNNER_INSTALL_DIR}/act_runner" "https://dl.gitea.com/act_runner/${ACT_RUNNER_VERSION}/act_runner-${ACT_RUNNER_VERSION}-${RUNNER_ARCH}"
@@ -1557,6 +1571,20 @@ install_act_runner() {
     chmod +x "${ACT_RUNNER_INSTALL_DIR}/act_runner"
     chown -R git:git "${ACT_RUNNER_INSTALL_DIR}"
     chown -R git:git "${ACT_RUNNER_DATA_DIR}"
+
+    # 确保 git 用户配置了 nvm
+    print_info "确保 git 用户配置了 nvm..."
+    if [[ -f "/home/git/.bashrc" ]]; then
+        if ! grep -q "nvm.sh" "/home/git/.bashrc"; then
+            print_info "为 git 用户添加 nvm 配置..."
+            echo "" >> /home/git/.bashrc
+            echo "# Load NVM" >> /home/git/.bashrc
+            echo "export NVM_DIR=\"\$HOME/.nvm\"" >> /home/git/.bashrc
+            echo "[ -s \"\$NVM_DIR/nvm.sh\" ] && \. \"\$NVM_DIR/nvm.sh\"  # This loads nvm" >> /home/git/.bashrc
+            echo "[ -s \"\$NVM_DIR/bash_completion\" ] && \. \"\$NVM_DIR/bash_completion\"  # This loads nvm bash_completion" >> /home/git/.bashrc
+            chown git:git /home/git/.bashrc
+        fi
+    fi
 
     # 验证安装
     if "${ACT_RUNNER_INSTALL_DIR}/act_runner" --version &> /dev/null; then
@@ -1595,6 +1623,9 @@ After=network.target
 User=git
 Group=git
 WorkingDirectory=${ACT_RUNNER_DATA_DIR}
+Environment=HOME=/home/git
+Environment=NODE_VERSION=24
+ExecStartPre=/bin/bash -c 'source /home/git/.nvm/nvm.sh && nvm use 24'
 ExecStart=${ACT_RUNNER_INSTALL_DIR}/act_runner daemon --config ${ACT_RUNNER_DATA_DIR}/config.yaml
 Restart=always
 RestartSec=3
