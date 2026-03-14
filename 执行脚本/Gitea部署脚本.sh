@@ -1572,6 +1572,19 @@ install_act_runner() {
     chown -R git:git "${ACT_RUNNER_INSTALL_DIR}"
     chown -R git:git "${ACT_RUNNER_DATA_DIR}"
 
+    # 安装 nvm 到 /opt/nvm
+    print_info "安装 nvm 到 /opt/nvm..."
+    if [[ ! -d "/opt/nvm" ]]; then
+        mkdir -p /opt/nvm
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash -s -- --no-install
+        cp -r "$HOME/.nvm/"* "/opt/nvm/"
+        chown -R git:git /opt/nvm
+        chmod -R 755 /opt/nvm
+        print_success "nvm 安装到 /opt/nvm 成功"
+    else
+        print_info "nvm 已安装在 /opt/nvm"
+    fi
+
     # 确保 git 用户配置了 nvm
     print_info "确保 git 用户配置了 nvm..."
     if [[ -f "/home/git/.bashrc" ]]; then
@@ -1579,19 +1592,23 @@ install_act_runner() {
             print_info "为 git 用户添加 nvm 配置..."
             echo "" >> /home/git/.bashrc
             echo "# Load NVM" >> /home/git/.bashrc
-            echo "export NVM_DIR=\"/root/.nvm\"" >> /home/git/.bashrc
+            echo "export NVM_DIR=\"/opt/nvm\"" >> /home/git/.bashrc
             echo "[ -s \"\$NVM_DIR/nvm.sh\" ] && \. \"\$NVM_DIR/nvm.sh\"  # This loads nvm" >> /home/git/.bashrc
             echo "[ -s \"\$NVM_DIR/bash_completion\" ] && \. \"\$NVM_DIR/bash_completion\"  # This loads nvm bash_completion" >> /home/git/.bashrc
             chown git:git /home/git/.bashrc
         fi
     fi
 
+    # 安装 Node.js 24
+    print_info "安装 Node.js 24..."
+    sudo -u git bash -c 'source /opt/nvm/nvm.sh && nvm install 24 && nvm use 24 && nvm alias default 24'
+
     # 创建 Node.js 符号链接到系统路径
     print_info "创建 Node.js 符号链接..."
-    if [[ -f "/root/.nvm/versions/node/v24.14.0/bin/node" ]]; then
-        ln -sf /root/.nvm/versions/node/v24.14.0/bin/node /usr/local/bin/node
-        ln -sf /root/.nvm/versions/node/v24.14.0/bin/npm /usr/local/bin/npm
-        ln -sf /root/.nvm/versions/node/v24.14.0/bin/npx /usr/local/bin/npx
+    if [[ -f "/opt/nvm/versions/node/v24.14.0/bin/node" ]]; then
+        ln -sf /opt/nvm/versions/node/v24.14.0/bin/node /usr/local/bin/node
+        ln -sf /opt/nvm/versions/node/v24.14.0/bin/npm /usr/local/bin/npm
+        ln -sf /opt/nvm/versions/node/v24.14.0/bin/npx /usr/local/bin/npx
         chmod +x /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx
         print_success "Node.js 符号链接创建成功"
     else
