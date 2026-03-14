@@ -100,37 +100,7 @@ jobs:
 - `name`：步骤的名称
 - `with`：传递给动作的参数
 
-## 示例：Go 项目工作流
 
-```yaml
-name: Go CI
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  build:
-    runs-on: linux_amd64
-    steps:
-    - uses: actions/checkout@v3
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.20'
-
-    - name: Build
-      run: go build -v ./...
-
-    - name: Test
-      run: go test -v ./...
-
-    - name: Lint
-      run: go fmt ./...
-```
 
 ## 示例：Node.js 项目工作流
 
