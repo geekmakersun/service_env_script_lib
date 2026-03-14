@@ -1,19 +1,19 @@
 # Nginx + ModSecurity 编译安装部署指南
 
-**文档版本**: V5.0  
+**文档版本**: V6.0  
 **适配环境**: Ubuntu 22.04.5 LTS  
-**核心版本**: Nginx 1.25.4、ModSecurity 3.0.10  
-**核心调整**: 使用自定义安全规则（不依赖 OWASP CRS），配置自定义错误页面，支持不同攻击类型显示对应错误页面**
+**核心版本**: Nginx 1.25.4、ModSecurity 3.0.12  
+**核心调整**: 拆分为独立的 Nginx 安装脚本和 ModSecurity 安装脚本，使用自定义安全规则（不依赖 OWASP CRS），配置自定义错误页面，支持不同攻击类型显示对应错误页面**
 
 ---
 
 ## 目录
 
 1. [系统准备](#系统准备)
-2. [依赖安装](#依赖安装)
-3. [目录结构创建](#目录结构创建)
-4. [编译安装 ModSecurity](#编译安装-modsecurity)
-5. [编译安装 Nginx](#编译安装-nginx)
+2. [安装方式选择](#安装方式选择)
+3. [单独安装 Nginx](#单独安装-nginx)
+4. [单独安装 ModSecurity](#单独安装-modsecurity)
+5. [Nginx 集成 ModSecurity](#nginx-集成-modsecurity)
 6. [集成 OWASP CRS 规则集](#集成-owasp-crs-规则集)
 7. [配置 ModSecurity](#配置-modsecurity)
 8. [配置 Nginx](#配置-nginx)
@@ -56,165 +56,518 @@ sudo update-locale LC_ALL=zh_CN.UTF-8 LANG=zh_CN.UTF-8
 
 ---
 
-## 依赖安装
+## 安装方式选择
 
-无需 GeoIP/MaxMind 相关依赖，仅安装基础编译及运行依赖：
+本指南提供两种安装方式：
 
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y gcc g++ make cmake libpcre3 libpcre3-dev libssl-dev zlib1g zlib1g-dev \
-libxml2 libxml2-dev libcurl4-openssl-dev liblua5.3-dev git wget unzip pkg-config libtool \
-automake autoconf liblmdb-dev libyaml-dev
-```
+### 方式一：单独安装 Nginx
 
----
+使用独立的 Nginx 安装脚本，仅安装 Nginx 服务，不包含 ModSecurity。
 
-## 目录结构创建
+**适用场景**：
+- 仅需要 Nginx 作为 Web 服务器
+- 后续可能需要单独安装 ModSecurity
+- 对系统资源有较高要求
 
-全程使用英文目录，适配 ModSecurity 路径解析：
+### 方式二：单独安装 ModSecurity
 
-```bash
-# 创建核心目录结构
-sudo mkdir -p /service/nginx/{build,src}
-sudo mkdir -p /etc/nginx/{conf.d,enabled,disabled,ssl,modsecurity/{rules,custom-rules,logs,tmp},error-html}
-sudo mkdir -p /var/log/nginx/{site,modsecurity}
-sudo mkdir -p /var/www/html
+使用独立的 ModSecurity 安装脚本，仅安装 ModSecurity 库和规则，不包含 Nginx。
 
-# 配置目录权限
-sudo chown -R www-data:www-data /etc/nginx /var/log/nginx /var/www/html /etc/nginx/modsecurity/tmp
-sudo chmod -R 755 /service/nginx /etc/nginx /var/www/html
-sudo chmod -R 700 /etc/nginx/ssl /etc/nginx/modsecurity/tmp
-```
+**适用场景**：
+- 已安装 Nginx，需要添加 WAF 功能
+- 调试 ModSecurity 规则
+- 与其他 Web 服务器配合使用
 
-### 目录说明
+### 方式三：Nginx 集成 ModSecurity
 
-| 目录路径 | 功能说明 |
-|---------|---------|
-| `/service/nginx/build` | ModSecurity 和 Nginx 编译工作目录 |
-| `/service/nginx/src` | Nginx 源码存放目录 |
-| `/etc/nginx/enabled` | 运行中的站点配置目录 |
-| `/etc/nginx/disabled` | 暂停的站点配置目录 |
-| `/etc/nginx/modsecurity/rules` | OWASP CRS 规则集目录 |
-| `/etc/nginx/modsecurity/custom-rules` | 自定义规则目录（单独存放，不与 CRS 规则混在一起） |
-| `/etc/nginx/modsecurity` | ModSecurity 配置/规则集/临时文件目录 |
-| `/etc/nginx/error-html` | 自定义错误页面目录 |
-| `/var/log/nginx/modsecurity` | ModSecurity 独立审计/调试日志 |
-| `/var/log/nginx/site` | 各站点独立访问/错误日志 |
-| `/etc/nginx/ssl` | SSL 证书存放目录 |
-| `/var/www/html` | 站点默认根目录 |
+先安装 ModSecurity，然后重新编译 Nginx 并集成 ModSecurity 模块。
+
+**适用场景**：
+- 需要完整的 WAF 保护
+- 生产环境部署
+- 对安全性有较高要求
 
 ---
 
-## 编译安装 ModSecurity
+## 单独安装 Nginx
+
+使用独立的 Nginx 安装脚本进行安装：
 
 ```bash
-# 进入编译工作目录
-cd /service/nginx/build
-
-# 拉取指定版本 ModSecurity 源码
-git clone --depth 1 --branch v3.0.10 https://github.com/SpiderLabs/ModSecurity.git modsecurity-core
-cd modsecurity-core
-
-# 初始化子模块（关键步骤，缺失会导致编译失败）
-git submodule init
-git submodule update
-
-# 编译配置与安装（禁用 GeoIP/MaxMind，无需额外编译参数）
-./build.sh
-./configure --prefix=/usr/local/modsecurity
-make -j$(nproc)
-sudo make install
-
-# 验证安装（显示 bin、include、lib、share 即为成功）
-ls /usr/local/modsecurity/
-
-# 配置系统库路径并生效
-sudo tee /etc/ld.so.conf.d/modsecurity.conf <<EOF
-/usr/local/modsecurity/lib
-EOF
-sudo ldconfig
-
-# 验证库识别成功（有输出即为正常）
-ldconfig -p | grep modsecurity
+# 运行 Nginx 安装脚本
+sudo bash /root/服务脚本库/执行脚本/Nginx安装脚本.sh
 ```
 
-### Git 克隆失败处理
+### 安装流程
 
-若 `git clone` 报错或网络超时，改用手动下载源码包方式：
+1. 检查系统环境和权限
+2. 安装编译依赖
+3. 创建目录结构
+4. 下载 Nginx 源码
+5. 编译安装 Nginx
+6. 配置 Nginx
+7. 安装错误页面
+8. 创建 Systemd 服务
+9. 配置日志轮转
+10. 验证安装并启动服务
 
-```bash
-cd /service/nginx/build
-
-# 下载主源码包
-wget https://github.com/SpiderLabs/ModSecurity/releases/download/v3.0.10/modsecurity-v3.0.10.tar.gz -O modsecurity-3.0.10.tar.gz
-tar -zxvf modsecurity-3.0.10.tar.gz
-mv modsecurity-v3.0.10 modsecurity-core
-
-# 下载依赖包（替代 git submodule）
-cd modsecurity-core
-wget https://github.com/SpiderLabs/ModSecurity/releases/download/v3.0.10/modsecurity-v3.0.10-deps.tar.gz
-tar -zxvf modsecurity-v3.0.10-deps.tar.gz
-```
-
-下载完成后，继续执行上述编译安装命令即可。
-
----
-
-## 编译安装 Nginx
-
-### 拉取 ModSecurity-Nginx 适配模块
+### 验证安装
 
 ```bash
-cd /service/nginx/build
-git clone --depth 1 https://github.com/SpiderLabs/ModSecurity-nginx.git modsecurity-nginx-adapter
-```
-
-克隆失败处理：参考上一章手动下载方案，替换为对应压缩包下载解压即可。
-
-### 下载并编译 Nginx
-
-```bash
-cd /service/nginx/src
-
-# 下载 Nginx 1.25.4 源码包
-wget https://nginx.org/download/nginx-1.25.4.tar.gz
-
-# 解压源码
-tar -zxvf nginx-1.25.4.tar.gz
-
-# 进入源码目录
-cd nginx-1.25.4
-
-# 配置编译参数
-./configure \
---prefix=/etc/nginx \
---sbin-path=/usr/sbin/nginx \
---conf-path=/etc/nginx/nginx.conf \
---error-log-path=/var/log/nginx/global.error.log \
---http-log-path=/var/log/nginx/global.access.log \
---pid-path=/var/run/nginx.pid \
---lock-path=/var/run/nginx.lock \
---user=www-data \
---group=www-data \
---with-http_ssl_module \
---with-http_v2_module \
---with-http_gzip_static_module \
---with-http_stub_status_module \
---with-pcre \
---with-stream \
---with-stream_ssl_module \
---add-module=/service/nginx/build/modsecurity-nginx-adapter \
---with-ld-opt="-L/usr/local/modsecurity/lib -lmodsecurity"
-
-# 多核编译，提升编译速度
-make -j$(nproc)
-
-# 安装 Nginx
-sudo make install
-
-# 验证安装（显示 nginx version: nginx/1.25.4 即为成功）
+# 检查 Nginx 版本
 nginx -v
+
+# 检查服务状态
+systemctl status nginx
+
+# 测试访问
+curl http://localhost/
 ```
+
+---
+
+## 单独安装 ModSecurity
+
+使用独立的 ModSecurity 安装脚本进行安装：
+
+```bash
+# 运行 ModSecurity 安装脚本
+sudo bash /root/服务脚本库/执行脚本/ModSecurity安装脚本.sh
+```
+
+### 安装流程
+
+1. 检查系统环境和权限
+2. 安装编译依赖
+3. 创建目录结构
+4. 下载 ModSecurity 源码和 Nginx 连接器
+5. 编译安装 ModSecurity
+6. 下载 CRS 规则集
+7. 配置 ModSecurity
+8. 验证安装
+
+### 验证安装
+
+```bash
+# 检查 ModSecurity 库是否加载
+ldconfig -p | grep modsecurity
+
+# 检查配置文件是否存在
+ls -la /etc/nginx/modsecurity/
+```
+
+---
+
+## Nginx 集成 ModSecurity
+
+### 步骤 1：安装 ModSecurity
+
+首先按照上述步骤安装 ModSecurity。
+
+### 步骤 2：重新编译 Nginx
+
+需要重新编译 Nginx 并添加 ModSecurity 模块：
+
+```bash
+# 进入 Nginx 源码目录
+cd /usr/local/src/nginx-1.25.4
+
+# 清理之前的编译
+make clean
+
+# 配置编译参数，添加 ModSecurity 模块
+auto/configure \
+    --prefix=/etc/nginx \
+    --sbin-path=/usr/sbin/nginx \
+    --modules-path=/usr/lib/nginx/modules \
+    --conf-path=/etc/nginx/nginx.conf \
+    --error-log-path=/var/log/nginx/error.log \
+    --http-log-path=/var/log/nginx/access.log \
+    --pid-path=/var/run/nginx.pid \
+    --lock-path=/var/run/nginx.lock \
+    --http-client-body-temp-path=/var/cache/nginx/client_temp \
+    --http-proxy-temp-path=/var/cache/nginx/proxy_temp \
+    --http-fastcgi-temp-path=/var/cache/nginx/fastcgi_temp \
+    --http-uwsgi-temp-path=/var/cache/nginx/uwsgi_temp \
+    --http-scgi-temp-path=/var/cache/nginx/scgi_temp \
+    --user=www-data \
+    --group=www-data \
+    --with-compat \
+    --with-file-aio \
+    --with-threads \
+    --with-http_addition_module \
+    --with-http_auth_request_module \
+    --with-http_dav_module \
+    --with-http_flv_module \
+    --with-http_gunzip_module \
+    --with-http_gzip_static_module \
+    --with-http_mp4_module \
+    --with-http_random_index_module \
+    --with-http_realip_module \
+    --with-http_secure_link_module \
+    --with-http_slice_module \
+    --with-http_ssl_module \
+    --with-http_stub_status_module \
+    --with-http_sub_module \
+    --with-http_v2_module \
+    --with-http_v3_module \
+    --with-mail \
+    --with-mail_ssl_module \
+    --with-stream \
+    --with-stream_realip_module \
+    --with-stream_ssl_module \
+    --with-stream_ssl_preread_module \
+    --add-module=/usr/local/src/modsecurity-nginx-v1.0.3 \
+    --with-cc-opt="-I/usr/local/modsecurity/include -O2 -fstack-protector-strong -Wformat -Werror=format-security" \
+    --with-ld-opt="-L/usr/local/modsecurity/lib -Wl,-rpath,/usr/local/modsecurity/lib"
+
+# 编译安装
+make -j$(nproc)
+sudo make install
+```
+
+### 步骤 3：在 Nginx 配置中启用 ModSecurity
+
+编辑 Nginx 主配置文件：
+
+```bash
+sudo vim /etc/nginx/nginx.conf
+```
+
+在 `http` 块中添加以下配置：
+
+```nginx
+# ModSecurity WAF 配置
+modsecurity on;
+modsecurity_rules_file /etc/nginx/modsecurity/modsec.conf;
+```
+
+### 步骤 4：验证集成
+
+```bash
+# 检查 Nginx 版本和模块
+nginx -V 2>&1 | grep -i modsecurity
+
+# 测试配置语法
+nginx -t
+
+# 重启 Nginx 服务
+sudo systemctl restart nginx
+
+# 测试 ModSecurity 是否生效
+curl -s -o /dev/null -w "%{http_code}" "http://localhost/?test=<script>alert(1)</script>"
+```
+
+---
+
+## 集成 OWASP CRS 规则集
+
+**说明**：本方案使用自定义安全规则，不依赖 OWASP CRS。以下内容仅供参考，如需使用 OWASP CRS 可自行安装。
+
+OWASP CRS 为通用 Web 应用防护规则集，是 ModSecurity 实现 XSS、SQL 注入拦截的核心。
+
+```bash
+cd /etc/nginx/modsecurity
+
+# 拉取 3.3.4 版本规则集
+git clone --depth 1 --branch v3.3.4 https://github.com/coreruleset/coreruleset.git rules
+```
+
+### 克隆失败处理：手动下载压缩包方式
+
+```bash
+cd /etc/nginx/modsecurity
+wget https://github.com/coreruleset/coreruleset/archive/refs/tags/v3.3.4.tar.gz -O crs-3.3.4.tar.gz
+tar -zxvf crs-3.3.4.tar.gz
+mv coreruleset-3.3.4 rules
+```
+
+---
+
+## 配置 ModSecurity
+
+### 创建 ModSecurity 主配置文件
+
+删除废弃指令，关闭调试日志，开启主动拦截模式：
+
+```bash
+sudo tee /etc/nginx/modsecurity/modsec.conf << 'EOF'
+# ModSecurity 3.0.12 核心配置
+SecRuleEngine On
+SecRequestBodyAccess On
+SecResponseBodyAccess On
+SecResponseBodyMimeType text/plain text/html text/xml application/json
+
+# 临时文件目录（必配，确保 www-data 有读写权限）
+SecDataDir /etc/nginx/modsecurity/tmp
+SecTmpDir /etc/nginx/modsecurity/tmp
+
+# 日志配置（3.x 兼容，删除废弃 SecLogDir）
+SecDebugLog /var/log/nginx/modsecurity/debug.log
+SecDebugLogLevel 0
+SecAuditLog /var/log/nginx/modsecurity/audit.log
+SecAuditLogFormat JSON
+SecAuditLogType Serial
+
+# 加载自定义规则
+Include /etc/nginx/modsecurity/custom.conf
+
+# 可选：添加误拦截放行规则（根据业务需求调整）
+# SecRule REQUEST_URI "@beginsWith /api/health" "id:100,phase:1,allow,nolog"
+EOF
+```
+
+### 创建自定义安全规则
+
+创建自定义安全规则文件，包含 XSS、SQL 注入、命令注入、文件包含、路径遍历等攻击检测：
+
+```bash
+sudo tee /etc/nginx/modsecurity/custom.conf << 'EOF'
+# ===========================================
+# ModSecurity 自定义安全规则
+# 规则 ID 范围: 100000-199999
+# ===========================================
+
+# ----------
+# XSS 攻击检测 (规则 ID: 100001-100099)
+# ----------
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx <script[\s\S]*?>|javascript:|on\w+\s*=" \
+    "id:100001,phase:2,deny,status:403,log,msg:'XSS Attack Detected',setenv:MODSEC_ATTACK_TYPE=xss"
+
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx <iframe|<object|<embed|<svg[\s\S]*?onload" \
+    "id:100002,phase:2,deny,status:403,log,msg:'XSS Attack Detected (iframe/object/embed)',setenv:MODSEC_ATTACK_TYPE=xss"
+
+# ----------
+# SQL 注入检测 (规则 ID: 100100-100199)
+# ----------
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(union\s+select|select\s+from|insert\s+into|delete\s+from|drop\s+table|update\s+\w+\s+set)" \
+    "id:100100,phase:2,deny,status:403,log,msg:'SQL Injection Detected',setenv:MODSEC_ATTACK_TYPE=sql_injection"
+
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(or\s+1\s*=\s*1|and\s+1\s*=\s*1|'\s*or\s+'|\"\s*or\s+\")" \
+    "id:100101,phase:2,deny,status:403,log,msg:'SQL Injection Detected (Boolean-based)',setenv:MODSEC_ATTACK_TYPE=sql_injection"
+
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(exec\s*\(|execute\s*\(|xp_cmdshell|sp_executesql)" \
+    "id:100102,phase:2,deny,status:403,log,msg:'SQL Injection Detected (Command execution)',setenv:MODSEC_ATTACK_TYPE=sql_injection"
+
+# ----------
+# 命令注入检测 (规则 ID: 100200-100299)
+# ----------
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(;|\||`|\$\(|\$\{)\s*(ls|cat|pwd|whoami|id|uname|wget|curl|nc|bash|sh|python|perl|ruby|php)" \
+    "id:100200,phase:2,deny,status:403,log,msg:'Command Injection Detected',setenv:MODSEC_ATTACK_TYPE=command_injection"
+
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(\|\|.*\||&&.*&|\$\(|`.*`)" \
+    "id:100201,phase:2,deny,status:403,log,msg:'Command Injection Detected (Shell metacharacters)',setenv:MODSEC_ATTACK_TYPE=command_injection"
+
+# ----------
+# 文件包含攻击检测 (规则 ID: 100300-100399)
+# ----------
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(php://|file://|expect://|data://|zip://|phar://)" \
+    "id:100300,phase:2,deny,status:403,log,msg:'File Inclusion Detected (Protocol wrapper)',setenv:MODSEC_ATTACK_TYPE=file_inclusion"
+
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(include\s*\(|require\s*\(|include_once\s*\(|require_once\s*\()" \
+    "id:100301,phase:2,deny,status:403,log,msg:'File Inclusion Detected (PHP functions)',setenv:MODSEC_ATTACK_TYPE=file_inclusion"
+
+# ----------
+# 路径遍历攻击检测 (规则 ID: 100400-100499)
+# ----------
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx \.\./|\.\.\\" \
+    "id:100400,phase:2,deny,status:403,log,msg:'Path Traversal Detected',setenv:MODSEC_ATTACK_TYPE=path_traversal"
+
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(/etc/passwd|/etc/shadow|/etc/hosts|/proc/self|/var/log)" \
+    "id:100401,phase:2,deny,status:403,log,msg:'Path Traversal Detected (Sensitive file access)',setenv:MODSEC_ATTACK_TYPE=path_traversal"
+
+# ----------
+# 敏感文件访问检测 (规则 ID: 100500-100599)
+# ----------
+SecRule REQUEST_URI "@rx (?i)\.(env|git|svn|bak|backup|sql|conf|config|ini|log|sh|py|pl|rb)$" \
+    "id:100500,phase:2,deny,status:403,log,msg:'Sensitive File Access Detected',setenv:MODSEC_ATTACK_TYPE=sensitive_file"
+
+SecRule REQUEST_URI "@rx (?i)(\.htaccess|\.htpasswd|web\.config|\.DS_Store)" \
+    "id:100501,phase:2,deny,status:403,log,msg:'Sensitive File Access Detected (Config files)',setenv:MODSEC_ATTACK_TYPE=sensitive_file"
+
+# ----------
+# 敏感路径访问检测 (规则 ID: 100600-100699)
+# ----------
+SecRule REQUEST_URI "@rx (?i)^/(admin|manager|phpmyadmin|mysql|backup|config|test|tmp|debug)" \
+    "id:100600,phase:2,deny,status:403,log,msg:'Sensitive Path Access Detected',setenv:MODSEC_ATTACK_TYPE=sensitive_path"
+
+# ----------
+# 恶意编码检测 (规则 ID: 100700-100799)
+# ----------
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(%3Cscript|%3C/script|%3Ciframe|%3Cobject|%3Cembed|%253C)" \
+    "id:100700,phase:2,deny,status:403,log,msg:'Malicious Encoding Detected',setenv:MODSEC_ATTACK_TYPE=malicious_encoding"
+
+SecRule REQUEST_URI|REQUEST_BODY|ARGS "@rx (?i)(0x[0-9a-f]+|\\x[0-9a-f]{2}|\\u[0-9a-f]{4})" \
+    "id:100701,phase:2,deny,status:403,log,msg:'Malicious Encoding Detected (Hex/Unicode)',setenv:MODSEC_ATTACK_TYPE=malicious_encoding"
+
+# ----------
+# 默认规则 (规则 ID: 199999)
+# ----------
+# 如果以上规则都没有匹配，但请求被拦截，使用通用错误页面
+SecRule REQUEST_URI "@rx .*" \
+    "id:199999,phase:5,pass,nolog,setenv:MODSEC_ATTACK_TYPE=general"
+EOF
+```
+
+### 配置文件权限
+
+确保 www-data 用户对 ModSecurity 配置文件有读写权限：
+
+```bash
+sudo chown www-data:www-data /etc/nginx/modsecurity/modsec.conf
+sudo chmod 640 /etc/nginx/modsecurity/modsec.conf
+
+sudo chown www-data:www-data /etc/nginx/modsecurity/custom.conf
+sudo chmod 640 /etc/nginx/modsecurity/custom.conf
+```
+
+---
+
+## 配置 Nginx
+
+集成 ModSecurity，实现多站点管理，预留 SSL/HTTPS 配置，自定义错误页面：
+
+```bash
+sudo tee /etc/nginx/nginx.conf << EOF
+# Nginx 主配置文件
+# 运行用户，www-data 是 Debian/Ubuntu 系统默认的 Web 服务用户
+user  www-data;
+
+# 工作进程数，auto 表示自动检测 CPU 核心数
+worker_processes  auto;
+
+# 错误日志路径和级别：debug/info/notice/warn/error/crit
+error_log  /var/log/nginx/global.error.log warn;
+
+# 主进程 PID 文件位置
+pid        /var/run/nginx.pid;
+
+# 事件模块配置
+events {
+    # 单个工作进程的最大连接数
+    worker_connections  1024;
+    # 使用 epoll 事件模型（Linux 高性能 I/O 多路复用）
+    use epoll;
+    # 允许一个进程同时接受多个新连接
+    multi_accept on;
+}
+
+# HTTP 服务配置
+http {
+    # 加载 MIME 类型映射表
+    include       /etc/nginx/mime.types;
+    # 默认文件类型（二进制流，浏览器会下载而非显示）
+    default_type  application/octet-stream;
+
+    # 自定义访问日志格式
+    # $remote_addr: 客户端 IP
+    # $remote_user: 客户端用户名
+    # $time_local: 访问时间
+    # $request: 请求方法和路径
+    # $status: 响应状态码
+    # $body_bytes_sent: 响应体大小
+    # $http_referer: 来源页面
+    # $http_user_agent: 客户端浏览器信息
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    # 访问日志路径，使用 main 格式
+    access_log  /var/log/nginx/global.access.log  main;
+
+    # ========== 性能优化配置 ==========
+    # 启用 sendfile，零拷贝方式传输文件，提高性能
+    sendfile        on;
+    # 在 sendfile 开启时，合并数据包一次性发送
+    tcp_nopush      on;
+    # 禁用 Nagle 算法，减少网络延迟
+    tcp_nodelay     on;
+    # 长连接超时时间（秒）
+    keepalive_timeout  65;
+    # MIME 类型哈希表最大大小
+    types_hash_max_size 2048;
+    # 请求体最大大小（上传文件限制）
+    client_max_body_size 100M;
+    # 隐藏 Nginx 版本号，增强安全性
+    server_tokens off;
+
+    # ========== ModSecurity WAF 配置 ==========
+    # 开启 ModSecurity Web 应用防火墙
+    modsecurity on;
+    # ModSecurity 规则配置文件路径
+    modsecurity_rules_file /etc/nginx/modsecurity/modsec.conf;
+
+    # ========== 根据攻击类型映射错误页面 ==========
+    # ModSecurity 通过环境变量 MODSEC_ATTACK_TYPE 传递攻击类型
+    # map 指令根据攻击类型返回对应的错误页面路径
+    map $modsec_attack_type $error_page_path {
+        default                /error-html/403_通用安全威胁.html;
+        xss                    /error-html/403_XSS攻击.html;
+        sql_injection          /error-html/403_SQL注入攻击.html;
+        command_injection      /error-html/403_命令注入攻击.html;
+        file_inclusion         /error-html/403_文件包含攻击.html;
+        path_traversal         /error-html/403_路径遍历攻击.html;
+        sensitive_file         /error-html/403_敏感文件访问.html;
+        sensitive_path         /error-html/403_敏感路径访问.html;
+        malicious_encoding     /error-html/403_恶意编码攻击.html;
+        general                /error-html/403_通用安全威胁.html;
+    }
+
+    # ========== 自定义错误页面 ==========
+    # 400 错误请求
+    error_page 400 /error-html/400_错误请求.html;
+    # 401 未授权
+    error_page 401 /error-html/401_未授权.html;
+    # 403 安全威胁拦截（基于攻击类型显示不同页面）
+    error_page 403 @custom_403;
+    # 404 资源未找到
+    error_page 404 /error-html/404_资源未找到.html;
+    # 500 服务器内部错误
+    error_page 500 /error-html/500_服务器错误.html;
+    # 502 错误网关
+    error_page 502 /error-html/502_错误网关.html;
+    # 503 服务不可用
+    error_page 503 /error-html/503_服务不可用.html;
+    # 504 网关超时
+    error_page 504 /error-html/504_网关超时.html;
+
+    # ========== 错误页面处理（所有站点共用） ==========
+    # 捕获 ModSecurity 设置的环境变量
+    map $MODSEC_ATTACK_TYPE $modsec_attack_type {
+        default $MODSEC_ATTACK_TYPE;
+    }
+
+    # ========== 多站点管理 ==========
+    # 仅加载 enabled 目录下的站点配置（软链接方式管理站点）
+    include /etc/nginx/sites-enabled/*.conf;
+
+    # ========== SSL/TLS 基础配置（预留，站点可直接使用） ==========
+    # 支持的 TLS 协议版本，仅启用安全的 TLS 1.2 和 1.3
+    ssl_protocols TLSv1.2 TLSv1.3;
+    # 优先使用服务器端的加密套件顺序
+    ssl_prefer_server_ciphers on;
+    # 推荐的安全加密套件（支持前向保密）
+    # ECDHE/DHE: 密钥交换算法（支持前向保密）
+    # AES256-GCM: 对称加密算法（高强度）
+    # SHA384/SHA512: 消息认证码算法
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+    # SSL 会话超时时间
+    ssl_session_timeout 1d;
+    # SSL 会话缓存，shared:SSL 表示所有工作进程共享，10m 缓存大小
+    ssl_session_cache shared:SSL:10m;
+    # 禁用 SSL 会话票据，增强前向保密安全性
+    ssl_session_tickets off;
+}
+EOF
+```
+
+### 验证配置语法
+
+```bash
+nginx -t
+```
+
+**预期输出**: `syntax is ok`
 
 ---
 

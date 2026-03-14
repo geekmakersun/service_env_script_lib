@@ -8,21 +8,15 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 NGINX_VERSION="${NGINX_VERSION:-1.25.4}"
-MODSECURITY_VERSION="${MODSECURITY_VERSION:-3.0.12}"
-MODSECURITY_NGINX_VERSION="${MODSECURITY_NGINX_VERSION:-1.0.3}"
-
 INSTALL_PREFIX="${INSTALL_PREFIX:-/etc/nginx}"
 SRC_DIR="/usr/local/src"
-MODSECURITY_PREFIX="/usr/local/modsecurity"
-MODSECURITY_CONFIG="${INSTALL_PREFIX}/modsecurity/modsec.conf"
-LOG_DIR="/var/log/nginx"
-MODSECURITY_LOG_DIR="/var/log/nginx/modsecurity"
-WWW_ROOT="/var/www"
 NGINX_SBIN_PATH="/usr/sbin"
 NGINX_CACHE_DIR="/var/cache/nginx"
 SYSTEMD_UNIT_DIR="/etc/systemd/system"
 SERVICE_DIR="/service/nginx"
 BACKUP_DIR="/service/nginx/backup"
+LOG_DIR="/var/log/nginx"
+WWW_ROOT="/var/www"
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -76,29 +70,6 @@ remove_nginx_binary() {
     fi
 }
 
-remove_modsecurity() {
-    log_info "移除 ModSecurity..."
-    if [ -d "${MODSECURITY_PREFIX}" ]; then
-        rm -rf "${MODSECURITY_PREFIX}"
-        log_info "ModSecurity 安装目录已删除"
-    fi
-
-    if [ -d "${SRC_DIR}/modsecurity-v${MODSECURITY_VERSION}" ]; then
-        rm -rf "${SRC_DIR}/modsecurity-v${MODSECURITY_VERSION}"
-        log_info "ModSecurity 源码已删除"
-    fi
-
-    if [ -d "${SRC_DIR}/modsecurity-nginx-v${MODSECURITY_NGINX_VERSION}" ]; then
-        rm -rf "${SRC_DIR}/modsecurity-nginx-v${MODSECURITY_NGINX_VERSION}"
-        log_info "ModSecurity-Nginx 连接器源码已删除"
-    fi
-
-    if [ -d "${SRC_DIR}/nginx-${NGINX_VERSION}" ]; then
-        rm -rf "${SRC_DIR}/nginx-${NGINX_VERSION}"
-        log_info "Nginx 源码已删除"
-    fi
-}
-
 remove_nginx_config() {
     log_info "移除 Nginx 配置目录..."
     if [ -d "${INSTALL_PREFIX}" ]; then
@@ -120,29 +91,24 @@ remove_service_dir() {
     fi
 }
 
-remove_source_dir() {
-    log_info "移除源码目录..."
-    if [ -d "${SRC_DIR}" ]; then
-        rm -rf "${SRC_DIR}"
-        log_info "源码目录已删除"
+remove_nginx_source() {
+    log_info "移除 Nginx 源码..."
+    if [ -d "${SRC_DIR}/nginx-${NGINX_VERSION}" ]; then
+        rm -rf "${SRC_DIR}/nginx-${NGINX_VERSION}"
+        log_info "Nginx 源码已删除"
     fi
 }
 
 remove_logs() {
-    log_info "移除日志目录..."
+    log_info "移除 Nginx 日志..."
     if [ -d "${LOG_DIR}" ]; then
         rm -rf "${LOG_DIR}"/*
         log_info "Nginx 日志已清除"
     fi
-
-    if [ -d "${MODSECURITY_LOG_DIR}" ]; then
-        rm -rf "${MODSECURITY_LOG_DIR}"/*
-        log_info "ModSecurity 日志已清除"
-    fi
 }
 
 remove_cache() {
-    log_info "移除缓存目录..."
+    log_info "移除 Nginx 缓存..."
     if [ -d "${NGINX_CACHE_DIR}" ]; then
         rm -rf "${NGINX_CACHE_DIR}"/*
         log_info "Nginx 缓存已清除"
@@ -156,43 +122,6 @@ remove_www_data() {
             userdel www-data 2>/dev/null || true
             groupdel www-data 2>/dev/null || true
             log_info "www-data 用户和组已删除"
-        fi
-    fi
-}
-
-remove_dependencies() {
-    log_info "检查编译依赖包..."
-    if confirm "是否删除编译依赖包 (build-essential, gcc, g++, make 等)"; then
-        log_warn "此操作可能影响其他需要编译的工具"
-        if confirm "确认删除"; then
-            apt-get remove -y --purge \
-                build-essential \
-                gcc \
-                g++ \
-                make \
-                libtool \
-                autoconf \
-                automake \
-                libpcre3 \
-                libpcre3-dev \
-                libssl-dev \
-                zlib1g \
-                zlib1g-dev \
-                libxml2 \
-                libxml2-dev \
-                libxslt1-dev \
-                libcurl4-openssl-dev \
-                liblua5.3-dev \
-                liblmdb-dev \
-                libyaml-dev \
-                libapr1-dev \
-                libaprutil1-dev \
-                libyajl-dev \
-                libpcre2-dev \
-                flex \
-                bison 2>/dev/null || true
-            apt-get autoremove -y
-            log_info "编译依赖已删除"
         fi
     fi
 }
@@ -221,18 +150,13 @@ verify_removal() {
         ((errors++))
     fi
 
-    if [ -d "${MODSECURITY_PREFIX}" ]; then
-        log_error "ModSecurity 目录仍然存在"
-        ((errors++))
-    fi
-
     if [ -d "${SERVICE_DIR}" ]; then
         log_error "服务目录仍然存在"
         ((errors++))
     fi
 
     if [ $errors -eq 0 ]; then
-        log_info "所有组件已成功卸载"
+        log_info "Nginx 所有组件已成功卸载"
     else
         log_error "发现 $errors 个问题，请手动检查"
     fi
@@ -241,21 +165,19 @@ verify_removal() {
 show_menu() {
     echo ""
     echo "=========================================="
-    echo "  Nginx + ModSecurity 深度卸载清理脚本"
+    echo "  Nginx 深度卸载清理脚本"
     echo "=========================================="
     echo ""
     echo "1. 停止 Nginx 服务"
     echo "2. 移除 Nginx systemd 服务"
     echo "3. 移除 Nginx 二进制文件"
-    echo "4. 移除 ModSecurity"
-    echo "5. 移除 Nginx 配置"
-    echo "6. 移除服务目录 (/service/nginx)"
-    echo "7. 移除源码目录 (/usr/local/src)"
-    echo "8. 移除日志文件"
-    echo "9. 移除缓存文件"
-    echo "10. 移除 www-data 用户/组"
-    echo "11. 移除网站根目录"
-    echo "12. 移除编译依赖包"
+    echo "4. 移除 Nginx 配置"
+    echo "5. 移除服务目录 (/service/nginx)"
+    echo "6. 移除 Nginx 源码"
+    echo "7. 移除 Nginx 日志"
+    echo "8. 移除 Nginx 缓存"
+    echo "9. 移除 www-data 用户/组"
+    echo "10. 移除网站根目录"
     echo ""
     echo "a. 执行全部清理"
     echo "v. 验证清理结果"
@@ -269,11 +191,11 @@ main() {
         exit 1
     fi
 
-    log_info "Nginx + ModSecurity 深度卸载清理脚本"
-    log_info "版本: Nginx ${NGINX_VERSION}, ModSecurity ${MODSECURITY_VERSION}"
+    log_info "Nginx 深度卸载清理脚本"
+    log_info "版本: Nginx ${NGINX_VERSION}"
     echo ""
 
-    if ! confirm "确定要执行卸载清理吗？此操作不可恢复"; then
+    if ! confirm "确定要执行 Nginx 卸载清理吗？此操作不可恢复"; then
         log_info "已取消"
         exit 0
     fi
@@ -286,24 +208,21 @@ main() {
             1) stop_nginx ;;
             2) remove_nginx_service ;;
             3) remove_nginx_binary ;;
-            4) remove_modsecurity ;;
-            5) remove_nginx_config ;;
-            6) remove_service_dir ;;
-            7) remove_source_dir ;;
-            8) remove_logs ;;
-            9) remove_cache ;;
-            10) remove_www_data ;;
-            11) remove_web_root ;;
-            12) remove_dependencies ;;
+            4) remove_nginx_config ;;
+            5) remove_service_dir ;;
+            6) remove_nginx_source ;;
+            7) remove_logs ;;
+            8) remove_cache ;;
+            9) remove_www_data ;;
+            10) remove_web_root ;;
             a|A)
                 log_info "开始执行全部清理..."
                 stop_nginx
                 remove_nginx_service
                 remove_nginx_binary
-                remove_modsecurity
                 remove_nginx_config
                 remove_service_dir
-                remove_source_dir
+                remove_nginx_source
                 remove_logs
                 remove_cache
                 remove_www_data
