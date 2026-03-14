@@ -60,15 +60,22 @@ jobs:
     runs-on: linux_amd64
     # 步骤
     steps:
-    # 1. 检出代码
+    
+    # 检查 Node.js 版本
+    - name: 检查 Node.js 版本
+      run: |
+        node --version
+        npm --version
+    
+    # 检出代码
     - name: 检出代码
       uses: actions/checkout@v3
     
-    # 2. 输出Hello World
+    # 输出Hello World
     - name: 输出测试信息
       run: echo "Hello, Gitea 工作流！"
     
-    # 3. 查看系统信息
+    # 查看系统信息
     - name: 查看系统信息
       run: uname -a
 ```
