@@ -173,7 +173,7 @@ download_sources() {
     if [[ ! -d "modsecurity-v${MODSECURITY_VERSION}/.git" ]]; then
         rm -rf "modsecurity-v${MODSECURITY_VERSION}"
         log_info "下载 ModSecurity ${MODSECURITY_VERSION}..."
-        git clone --tags https://github.com/geekmakersun/ModSecurity.git "modsecurity-v${MODSECURITY_VERSION}" || {
+        git clone --tags https://git.13aq.com/sunbingchen/ModSecurity-CN.git "modsecurity-v${MODSECURITY_VERSION}" || {
             log_error "ModSecurity 下载失败"
             exit 1
         }
@@ -183,7 +183,7 @@ download_sources() {
     if [[ ! -d "modsecurity-nginx-v${MODSECURITY_NGINX_VERSION}/.git" ]]; then
         rm -rf "modsecurity-nginx-v${MODSECURITY_NGINX_VERSION}"
         log_info "下载 ModSecurity-Nginx 连接器 ${MODSECURITY_NGINX_VERSION}..."
-        git clone https://github.com/geekmakersun/ModSecurity-nginx.git "modsecurity-nginx-v${MODSECURITY_NGINX_VERSION}" || {
+        git clone https://git.13aq.com/sunbingchen/ModSecurity-nginx-cn.git "modsecurity-nginx-v${MODSECURITY_NGINX_VERSION}" || {
             log_error "ModSecurity-Nginx 连接器下载失败"
             exit 1
         }
@@ -230,7 +230,7 @@ download_crs() {
 
     if [[ ! -d /usr/share/modsecurity-crs ]]; then
         cd /usr/share
-        git clone --depth 1 git@github.com:geekmakersun/coreruleset.git modsecurity-crs || {
+        git clone --depth 1 https://git.13aq.com/sunbingchen/coreruleset-cn.git modsecurity-crs || {
             log_warn "CRS 规则集下载失败，将使用基础规则"
             mkdir -p /usr/share/modsecurity-crs/rules
         }
