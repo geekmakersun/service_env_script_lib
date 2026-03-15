@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Nginx 1.25.4 源码编译安装脚本
+# Nginx 1.26 源码编译安装脚本
 # 用途: 从源码编译安装 Nginx
 # 适配: Ubuntu 22.04.5 LTS
 #
@@ -10,7 +10,7 @@ set -u # 使用未定义变量时报错
 
 # ========== 配置变量 ==========
 # 可自定义的变量（可通过环境变量覆盖）
-NGINX_VERSION="${NGINX_VERSION:-1.25.4}"
+NGINX_VERSION="${NGINX_VERSION:-1.26}"
 INSTALL_PREFIX="${INSTALL_PREFIX:-/etc/nginx}"
 SRC_DIR="/usr/local/src"
 
